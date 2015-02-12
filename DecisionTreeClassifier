@@ -1,0 +1,266 @@
+import java.util.*;
+import java.io.*;
+import javax.swing.tree.TreeNode;
+
+public class DecisionTreeClassifier {
+	ArrayList<Instance> trainInstances;
+	ArrayList<Instance> testInstances;
+	ArrayList<Variable> vars;
+	double repubProb = 1.0;
+	double demoProb = 1.0;
+	double info;
+	double[] repVoteProbs;
+	double[] demVoteProbs;
+	double[] yesProb;
+	int rep, dem;
+	int length;
+	PriorityQueue<Variable> infoGains;
+	
+	@SuppressWarnings(value = { "", "unchecked" })
+	public DecisionTreeClassifier(ArrayList<ArrayList<String>> input) {
+		getTrainingData(input.get(0));
+		vars = new ArrayList<Variable>();
+		for (int i = 0; i < length; i++) {
+			vars.add(new Variable(i));
+		}
+		infoGains = new PriorityQueue<Variable>();
+		info = calculateInfo((double)rep/(rep+dem));
+		Node tree = getDecisionTree(trainInstances, vars, new Node("republican"));
+		getTestingData(input.get(1), tree);
+		String output = "";
+		for (Instance test : testInstances) {
+			output += test.toString() + "\n";
+		}
+		System.out.println(output);
+	}
+	
+	public Node getDecisionTree(ArrayList<Instance> examples, ArrayList<Variable> atribs, Node majorityValue) {
+		if (examples.size() == 0) {          // EXAMPLES = 0
+			return majorityValue;
+		}
+		int count = 0;
+		for (Instance i : examples) {
+			if (i.classValue) {
+				count++;
+			}
+		}
+		if (count == 0 || count == examples.size()) { // ALL EXAMPLES HAVE THE SAME CLASSIFICATION (return classification, prob = 1.0
+			if (examples.get(0).classValue) {
+				Node n = new Node("republican");
+				n.prob = 1.0;
+				return n;
+			}
+			else {
+				Node n = new Node("democrat");
+				n.prob = 1.0;
+				return n;
+			}
+		}
+		if (atribs.size() == 0) { // NO MORE ATRIBUTES LEFT, RETURN MAJORITY VAL = most frequent class in current examples / number of times class appears in training data
+			int r = 0; int d = 0;
+			for (Instance i : examples) {
+				if (i.classValue) {
+					r++;
+				}
+				else {
+					d++;
+				}
+			}
+			if (r >= d) {
+				Node n = new Node("republican");
+				n.prob = (double)r / (r + d);
+				return n;
+			}
+			else {
+				Node n = new Node("democrat");
+				n.prob = (double)d / (r + d);
+				return n;
+			}
+		}
+		infoGains.clear();
+		for (int i = atribs.size()-1; i >= 0; i--) { // calculate information gain for each variable, choose best variable
+			calculateGain(atribs.get(i));
+			infoGains.add(atribs.get(i));
+		}
+		Variable best = infoGains.poll();
+		atribs.remove(best);
+		Node tree = new Node(best);
+		int r = 0; int d = 0;
+		Node m;
+		for (Instance i : examples) {
+			if (i.classValue) {
+				r++;
+			}
+			else {
+				d++;
+			}
+		}
+		if (r >= d) {
+			m = new Node("republican");
+			m.prob = (double)r/ (r + d);
+		}
+		else {
+			m = new Node("democrat");
+			m.prob = (double)d/ (r + d);
+		}
+		for (int i = 0; i < 2; i++) { // FOR BEST = TRUE and BEST = FALSE
+			ArrayList<Instance> exs = new ArrayList<Instance>();
+			for (Instance inst : examples) {
+				if (inst.voteValues[best.index] == (i == 0)) {
+					exs.add(inst);
+				}
+			}
+			Node subtree = getDecisionTree(exs, atribs, m);
+			tree.add((i == 0), subtree);
+		}
+		return tree;
+	}
+	
+	public void calculateGain(Variable var) {
+		ArrayList<Instance> posExamples = new ArrayList<Instance>();
+		ArrayList<Instance> negExamples = new ArrayList<Instance>();
+		for (Instance inst : trainInstances) {
+			if (inst.voteValues[var.index]) {
+				posExamples.add(inst);
+			}
+			else {
+				negExamples.add(inst);
+			}
+		}
+		int p1 = 0; int p2 = 0; int n1 = 0; int n2 = 0;
+		for (Instance i : posExamples) {
+			if (i.classValue) {
+				p1++;
+			}
+			else {
+				n1++;
+			}
+		}
+		for (Instance i : negExamples) {
+			if (i.classValue) {
+				p2++;
+			}
+			else {
+				n2++;
+			}
+		}
+		double p_pos = (double)p1; double p_neg = (double)p2; double n_pos = (double)n1; double n_neg = (double)n2;
+		if (p_pos + n_pos == 0) {
+			var.gain = info - ((p_neg+n_neg)/(rep+dem))*(calculateInfo(p_neg/(p_neg + n_neg)));
+			return;
+		}
+		if (p_neg + n_neg == 0) {
+			var.gain = info - ((p_pos+n_pos)/(rep+dem))*(calculateInfo(p_pos/(p_pos + n_pos)));
+			return;
+		}
+		var.gain = info - (((p_pos+n_pos)/(rep+dem))*(calculateInfo(p_pos/(p_pos + n_pos))) + ((p_neg+n_neg)/(rep+dem))*(calculateInfo(p_neg/(p_neg + n_neg))));
+	}
+	
+	public double calculateInfo(double q) {
+		return -1*(q*(Math.log(q)/Math.log(2))+(1-q)*(Math.log(1-q)/Math.log(2))); 
+	}
+	
+	public static void main(String[] args) throws IOException { 
+		DecisionTreeClassifier dtc = new DecisionTreeClassifier(parseInput(args[0], args[1]));
+	}
+	
+	public static ArrayList<ArrayList<String>> parseInput(String train, String test) {
+		try {
+		File trainFile = new File(train);
+		BufferedReader br = new BufferedReader(new FileReader(trainFile));
+		ArrayList<String> trainingData = new ArrayList<String>();
+		String line;
+		while ((line = br.readLine()) != null) {
+			trainingData.add(line);
+		}
+		
+		File testFile = new File(test);
+		BufferedReader br2 = new BufferedReader(new FileReader(testFile));
+		ArrayList<String> testingData = new ArrayList<String>();
+		while ((line = br2.readLine()) != null) {
+			testingData.add(line);
+		}
+		ArrayList<ArrayList<String>> input = new ArrayList<ArrayList<String>>();
+		input.add(trainingData);
+		input.add(testingData);
+		return input;
+		}
+		catch (IOException ex) {
+			System.exit(0);
+		}
+		return null;
+	}
+	
+	public void getTrainingData(ArrayList<String> train) {
+		trainInstances = new ArrayList<Instance>();
+		rep = 0;
+		dem = 0;
+		for (String instance : train) {
+			Instance i = new Instance(instance);
+			length = i.voteValues.length;
+			trainInstances.add(i);
+			if (i.classValue) {
+				rep++;
+			} else {
+				dem++;
+			}
+		}
+		
+		if (rep == 0) {
+			repubProb = Math.log(((double)1.0/trainInstances.size()));
+		}
+		else {
+			repubProb = Math.log(((double)rep/trainInstances.size()));
+		}
+		if (dem == 0) {
+			demoProb = Math.log(((double)1.0/trainInstances.size()));
+		}
+		else{
+			demoProb = Math.log(((double)dem/trainInstances.size()));
+		}
+		
+		repVoteProbs = new double[length];
+		demVoteProbs = new double[length];
+		yesProb = new double[length];
+		for (int i = 0; i < length; i++) {
+			int repYes = 0;
+			int demYes = 0;
+			for (Instance instance : trainInstances) {
+				if (instance.voteValues[i] != null && instance.voteValues[i] && instance.classValue) {
+					repYes++;
+				}
+				else {
+					if (instance.voteValues[i] != null && instance.voteValues[i] && !instance.classValue) {
+						demYes++;
+					}
+				}
+			}
+			
+			repVoteProbs[i] = (double)repYes / rep;
+			demVoteProbs[i] = (double)demYes / dem;
+			if (repYes + demYes > 0) {
+				yesProb[i] = (double)(repYes + demYes)/ trainInstances.size();
+			}
+			else {
+				yesProb[i] = (double)1 / trainInstances.size();
+			}
+		}
+	}
+	
+	public void getTestingData(ArrayList<String> test, Node tree) {
+		testInstances = new ArrayList<Instance>();
+		for (String instance : test) {
+			Instance i = new Instance(instance, 0);
+			testOnTree(i, tree);
+			testInstances.add(i);
+		}
+	}
+	
+	public void testOnTree(Instance test, Node tree) {
+		while (tree.classification == null) {
+			tree = tree.get(test.voteValues[tree.data.index]);
+		}
+		test.classVal = tree.classification;
+		test.prob = tree.prob;
+	}
+}
